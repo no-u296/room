@@ -102,6 +102,15 @@
   #empty-state .icon{font-size:2.8rem;opacity:.18}
   #empty-state p{font-size:.75rem;color:var(--muted);text-align:center;max-width:240px;line-height:1.6}
   .error-banner{background:rgba(248,81,73,.1);border:1px solid rgba(248,81,73,.35);border-radius:6px;padding:7px 9px;font-size:.64rem;color:var(--danger);margin-bottom:9px;font-family:'JetBrains Mono',monospace}
+
+  /* search bar */
+  #search-wrap{position:absolute;top:14px;left:14px;display:flex;align-items:center;gap:6px;z-index:10}
+  #search-input{background:rgba(22,27,34,.95);border:1px solid var(--border);border-radius:6px;color:var(--text);font-family:'JetBrains Mono',monospace;font-size:.72rem;padding:5px 10px;outline:none;width:190px;transition:border-color .15s,width .2s;backdrop-filter:blur(6px)}
+  #search-input:focus{border-color:var(--accent);width:230px}
+  #search-input::placeholder{color:var(--muted)}
+  #search-count{font-family:'JetBrains Mono',monospace;font-size:.65rem;color:var(--muted);white-space:nowrap;background:rgba(22,27,34,.9);padding:3px 6px;border-radius:4px;backdrop-filter:blur(4px)}
+  .node.search-match circle{filter:drop-shadow(0 0 7px var(--warn)) brightness(1.35) !important}
+  .node.search-dim circle,.node.search-dim text{opacity:.1}
 </style>
 </head>
 <body>
@@ -131,15 +140,19 @@
       <div class="icon">🕸</div>
       <p>Paste TSV/CSV data or hit <strong style="color:var(--text)">Demo</strong> to load sample data →</p>
     </div>
+    <div id="search-wrap">
+      <input id="search-input" type="text" placeholder="🔍 Search name / roll…" oninput="onSearch(this.value)" onkeydown="if(event.key==='Escape'){this.value='';onSearch('')}"/>
+      <span id="search-count"></span>
+    </div>
     <div class="zoom-controls">
       <button onclick="zoomBy(1.3)">+</button>
       <button onclick="zoomBy(0.77)">−</button>
     </div>
     <div class="legend" id="legend" style="display:none">
       <div class="legend-title">Legend</div>
-      <div class="legend-item"><div class="legend-dot" style="border-color:#58a6ff;background:rgba(88,166,255,.15)"></div> BC / IC / IE / BE group</div>
-      <div class="legend-item"><div class="legend-dot" style="border-color:#3fb950;background:rgba(63,185,80,.15)"></div> BA / IMT / IMT group</div>
-      <div class="legend-item"><div class="legend-dot" style="border-color:#d29922;background:rgba(210,153,34,.15)"></div> Mixed-batch group</div>
+      <div class="legend-item"><div class="legend-dot" style="border-color:#58a6ff;background:rgba(88,166,255,.15)"></div> BTech (BA / BC / BE)</div>
+      <div class="legend-item"><div class="legend-dot" style="border-color:#3fb950;background:rgba(63,185,80,.15)"></div> IMTech (IC / IE)</div>
+      <div class="legend-item"><div class="legend-dot" style="border-color:#d29922;background:rgba(210,153,34,.15)"></div> Mixed (BTech + IMTech)</div>
       <div class="legend-item"><div class="legend-dot" style="border-color:#6e7681;background:rgba(110,118,129,.1)"></div> Referenced, not yet submitted</div>
       <div class="legend-item" style="margin-top:6px"><div class="legend-line" style="background:#4a5568"></div> One-way request</div>
       <div class="legend-item"><div class="legend-line" style="background:#3fb950"></div> Mutual ↔</div>
@@ -263,9 +276,9 @@ function shortName(full){
 // ─── Node colour by roll prefix ─────────────────────────────────────────────
 function nodeType(roll){
   const p = roll.slice(0,2).toUpperCase();
-  // BA, IMT → green; BC, IC, IE, BE → blue; mixed determined later
-  if(['BA','IM'].includes(p)) return 'ba';
-  return 'bc';
+  // IC, IE = IMTech (green); BA, BC, BE = BTech (blue)
+  if(['IC','IE'].includes(p)) return 'imt';
+  return 'bt';
 }
 
 function groupType(members){
@@ -274,8 +287,8 @@ function groupType(members){
   return 'mixed';
 }
 
-const NODE_STROKE = {bc:'#58a6ff', ba:'#3fb950', mixed:'#d29922', ghost:'#6e7681'};
-const NODE_FILL   = {bc:'rgba(88,166,255,.14)', ba:'rgba(63,185,80,.14)', mixed:'rgba(210,153,34,.14)', ghost:'rgba(110,118,129,.08)'};
+const NODE_STROKE = {bt:'#58a6ff', imt:'#3fb950', mixed:'#d29922', ghost:'#6e7681'};
+const NODE_FILL   = {bt:'rgba(88,166,255,.14)', imt:'rgba(63,185,80,.14)', mixed:'rgba(210,153,34,.14)', ghost:'rgba(110,118,129,.08)'};
 
 // ─── Build graph ─────────────────────────────────────────────────────────────
 function buildGraph(rows){
@@ -395,8 +408,8 @@ function renderGraph(data){
   // Circle
   nodeSel.append('circle')
     .attr('r',22)
-    .attr('fill',d=>NODE_FILL[d.type]||NODE_FILL.bc)
-    .attr('stroke',d=>NODE_STROKE[d.ghost?'ghost':d.type]||NODE_STROKE.bc);
+    .attr('fill',d=>NODE_FILL[d.type]||NODE_FILL.bt)
+    .attr('stroke',d=>NODE_STROKE[d.ghost?'ghost':d.type]||NODE_STROKE.bt);
 
   // Name line 1: rep display name
   nodeSel.append('text')
@@ -417,12 +430,15 @@ function renderGraph(data){
   );
 
   svgSel.on('click',()=>clearSel(nodeSel,linkSel));
+  _nodeSel=nodeSel; _linkSel=linkSel;
 
   simulation.on('tick',()=>{
     linkSel.attr('d',arcPath);
     nodeSel.attr('transform',d=>`translate(${d.x},${d.y})`);
   });
-  simulation.on('end',fitView);
+  // fit once on first render only
+  let _fitted=false;
+  simulation.on('end',()=>{if(!_fitted){_fitted=true;fitView();}});
 }
 
 function arcPath(d){
@@ -467,8 +483,8 @@ function clearSel(nodeSel,linkSel){
 function showNodeInfo(d){
   const outLinks=graphData.links.filter(l=>l.source===d.id);
   const inLinks =graphData.links.filter(l=>l.target===d.id);
-  const stroke  = NODE_STROKE[d.ghost?'ghost':d.type]||NODE_STROKE.bc;
-  const fill    = NODE_FILL[d.ghost?'ghost':d.type]||NODE_FILL.bc;
+  const stroke  = NODE_STROKE[d.ghost?'ghost':d.type]||NODE_STROKE.bt;
+  const fill    = NODE_FILL[d.ghost?'ghost':d.type]||NODE_FILL.bt;
 
   const memberRows = d.members.map(m=>`
     <li>
@@ -595,6 +611,59 @@ function loadDemo(){
 25\t6/29/2026 16:21\t6/29/2026 16:30\tYB.Siddharth@iiitb.ac.in\tY B Siddharth\tY B Siddharth\tBC2025116\t7320811387\tYB.Siddharth@iiitb.ac.in\tAbhinav Pullela\tIC2025021\tTelikicherla Venkata Sai Disen\tBE2025027\t\t`;
   document.getElementById('csv-input').value=d;
   parseAndRender();
+}
+
+
+// ─── Search ──────────────────────────────────────────────────────────────────
+let _nodeSel = null, _linkSel = null; // kept in scope for search
+
+function onSearch(q){
+  const countEl = document.getElementById('search-count');
+  if(!_nodeSel){ countEl.textContent=''; return; }
+  q = q.trim().toLowerCase();
+  if(!q){
+    _nodeSel.classed('search-match search-dim', false);
+    countEl.textContent = '';
+    return;
+  }
+  let hits = 0;
+  _nodeSel.each(function(d){
+    // match against: rep name, all member names, all roll numbers
+    const haystack = [
+      d.fullName,
+      d.id,
+      ...d.members.map(m=>m.name),
+      ...d.members.map(m=>m.roll),
+    ].join(' ').toLowerCase();
+    const match = haystack.includes(q);
+    if(match) hits++;
+    d3.select(this)
+      .classed('search-match', match)
+      .classed('search-dim', !match);
+  });
+  countEl.textContent = hits ? `${hits} found` : 'no match';
+
+  // If exactly one match, pan to it
+  if(hits === 1){
+    _nodeSel.each(function(d){
+      if(d3.select(this).classed('search-match')){
+        panToNode(d);
+      }
+    });
+  }
+}
+
+function panToNode(d){
+  if(!svgSel||!zoomBehavior) return;
+  const wrap = document.getElementById('graph-wrap');
+  const W = wrap.clientWidth, H = wrap.clientHeight;
+  // Get current transform scale
+  const t = d3.zoomTransform(svgSel.node());
+  const scale = Math.max(t.k, 1.2);
+  const tx = W/2 - scale * d.x;
+  const ty = H/2 - scale * d.y;
+  svgSel.transition().duration(400)
+    .call(zoomBehavior.transform, d3.zoomIdentity.translate(tx,ty).scale(scale));
 }
 
 // ─── Auto-fetch from GitHub Gist ─────────────────────────────────────────────
