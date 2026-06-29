@@ -596,6 +596,54 @@ function loadDemo(){
   document.getElementById('csv-input').value=d;
   parseAndRender();
 }
+
+// ─── Auto-fetch from GitHub Gist ─────────────────────────────────────────────
+const GIST_ID = 'ed92f3f67debe103cfda7a588a64b0d0';
+const GIST_FILE = 'room-data.tsv';
+const GIST_URL = `https://gist.githubusercontent.com/no-u296/${GIST_ID}/raw/${GIST_FILE}`;
+let autoFetchInterval = null;
+
+function setStatus(msg, color='var(--muted)'){
+  let el = document.getElementById('live-status');
+  if(!el) return;
+  el.textContent = msg;
+  el.style.color = color;
+}
+
+async function fetchFromGist(){
+  try{
+    setStatus('⟳ Fetching…', 'var(--warn)');
+    // cache-bust so we always get the latest
+    const res = await fetch(GIST_URL + '?t=' + Date.now());
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const tsv = await res.text();
+    if(!tsv || tsv.trim()==='placeholder' || tsv.trim().length < 10){
+      setStatus('⚠ Gist empty — waiting for first sync', 'var(--warn)');
+      return;
+    }
+    document.getElementById('csv-input').value = tsv;
+    parseAndRender();
+    const now = new Date().toLocaleTimeString('en-IN');
+    setStatus(`✓ Live — last sync ${now}`, 'var(--accent2)');
+  } catch(e){
+    setStatus('✕ Gist fetch failed: ' + e.message, 'var(--danger)');
+  }
+}
+
+function startAutoFetch(){
+  fetchFromGist(); // immediate first load
+  if(autoFetchInterval) clearInterval(autoFetchInterval);
+  autoFetchInterval = setInterval(fetchFromGist, 3 * 60 * 1000); // every 3 min
+}
+
+// Inject live-status bar into stats row
+document.addEventListener('DOMContentLoaded', ()=>{
+  const bar = document.getElementById('stats-bar');
+  const span = document.createElement('span');
+  span.innerHTML = `Live: <strong id="live-status" style="font-family:'JetBrains Mono',monospace">connecting…</strong>`;
+  bar.appendChild(span);
+  startAutoFetch();
+});
 </script>
 </body>
 </html>
